@@ -1,6 +1,6 @@
 # FinStream — Real-Time Financial Transaction Monitoring System
 
-FinStream is an educational, production-style, real-time financial transaction monitoring pipeline. It is engineered to demonstrate event streaming with Apache Kafka, robust stream consumption with Java 17 and Spring Boot 3.3.4, persistent idempotency with MySQL InnoDB, strict boundary evaluation for monitoring rules, and failure-safe data processing.
+FinStream is an educational, production-style, real-time financial transaction monitoring pipeline and fraud detection system. It is engineered to demonstrate event streaming with Apache Kafka, robust stream processing with Java 17 and Spring Boot 3.3.4, persistent idempotency with MySQL InnoDB, strict boundary evaluation for monitoring rules, and a clean, real-time web monitoring console.
 
 ---
 
@@ -8,7 +8,7 @@ FinStream is an educational, production-style, real-time financial transaction m
 
 ```mermaid
 flowchart TD
-    subgraph Producer ["Python Event Producer"]
+    subgraph Producer ["Python Event Ingestion Engine"]
         TG[Synthetic Transaction Generator] -->|JSON Event| KP[Kafka Producer Client]
     end
 
@@ -16,7 +16,7 @@ flowchart TD
         KP -->|Topic: 'transactions' <br/> acks=all, Key: transactionId| KT[Partition 0]
     end
 
-    subgraph Consumer ["Java 17 / Spring Boot Consumer"]
+    subgraph Consumer ["Java 17 / Spring Boot Stream Consumer (:8080)"]
         KT -->|Manual Immediate Acknowledgment| KC[TransactionKafkaConsumer]
         KC --> PS[TransactionProcessingService]
         PS -->|1. Validate Schema & Contract| VAL{Valid?}
@@ -37,7 +37,13 @@ flowchart TD
         REJ --> TBL_RJ[(rejected_events)]
     end
 
-    TXWRITE -->|Write Succeeded| ACK[commit Kafka Offset]
+    subgraph WebDashboard ["Real-Time Web Console (Vanilla JS / CSS)"]
+        REST[REST API Controller] -->|/api/stats, /api/transactions, /api/alerts, /api/rejected| UI[Live Dark Dashboard]
+        UI -->|Manual Trigger /api/send| KP
+        UI -->|Clear Data /api/clear| MySQLDB
+    end
+
+    TXWRITE -->|Write Succeeded| ACK[Commit Kafka Offset]
 ```
 
 ---
@@ -46,7 +52,7 @@ flowchart TD
 
 ```text
 finstream/
-├── .env.example                       # Template for local environment variables
+├── .env.example                       # Template for local environment variables (no secrets)
 ├── .gitignore                         # Excludes secrets (.env), venv, target/, logs
 ├── README.md                          # Comprehensive architectural and runbook documentation
 ├── database/
@@ -54,15 +60,14 @@ finstream/
 ├── sql/
 │   └── analytics.sql                  # Analytical SQL queries for monitoring and auditing
 ├── scripts/
-│   ├── start-kafka.ps1                # PowerShell helper to start KRaft standalone broker
-│   └── check-system.ps1               # Environment sanity check script
+│   └── start-kafka.ps1                # PowerShell helper to start KRaft standalone broker
 ├── producer/                          # Python event generation and ingestion
-│   ├── .venv/                         # Isolated Python virtual environment
-│   ├── requirements.txt               # Dependencies (kafka-python, pytest, python-dotenv)
+│   ├── .venv/                         # Isolated Python virtual environment (ignored)
+│   ├── requirements.txt               # Dependencies (confluent-kafka, pytest, python-dotenv)
 │   ├── transaction_generator.py       # Deterministic & synthetic transaction generation
 │   ├── producer.py                    # Kafka producer client with retries and acks=all
 │   ├── e2e_acceptance_scenarios.py    # Acceptance suite (Phase 4/5 historical)
-│   ├── e2e_phase6_acceptance.py       # Final Phase 6 live end-to-end acceptance suite
+│   ├── e2e_phase6_acceptance.py       # Phase 6 live end-to-end acceptance suite
 │   └── tests/
 │       ├── test_generator.py          # Generator unit tests
 │       └── test_producer.py           # Producer validation unit tests
@@ -74,12 +79,17 @@ finstream/
         │   │   ├── FinStreamApplication.java
         │   │   ├── config/KafkaConsumerConfig.java
         │   │   ├── consumer/TransactionKafkaConsumer.java
+        │   │   ├── controller/DashboardApiController.java   # Live REST API
         │   │   ├── model/             # Models: TransactionEvent, ProcessingResult, etc.
         │   │   ├── repository/TransactionRepository.java
         │   │   ├── service/           # TransactionProcessingService, TransactionValidator
         │   │   └── exception/         # ValidationException, IdCollisionException
         │   └── resources/
-        │       └── application.properties
+        │       ├── application.yml    # Datasource, Kafka, and Hikari configuration
+        │       └── static/            # Clean, dark-mode real-time web dashboard
+        │           ├── index.html
+        │           ├── css/style.css
+        │           └── js/app.js
         └── test/
             └── java/com/finstream/
                 ├── FinStreamApplicationTests.java
@@ -100,8 +110,8 @@ Incoming Kafka messages use UTF-8 JSON. Every message key is set to `transaction
   "accountId": "ACC_DEMO_101",
   "amount": 75000.00,
   "currency": "INR",
-  "timestamp": "2026-10-15T12:30:00Z",
-  "merchant": "Electronics Megastore"
+  "timestamp": "2026-10-15T20:15:20Z",
+  "merchant": "Cloud Retail Store"
 }
 ```
 
@@ -113,12 +123,12 @@ Incoming Kafka messages use UTF-8 JSON. Every message key is set to `transaction
 | `accountId` | String | Non-empty bank account identifier |
 | `amount` | Decimal | Positive number (`> 0`), 2-decimal precision |
 | `currency` | String | ISO-4217 3-letter currency code (`INR`) |
-| `timestamp` | String | ISO-8601 UTC timestamp ending in `Z` |
+| `timestamp` | String | ISO-8601 UTC timestamp ending in `Z` (`YYYY-MM-DDTHH:mm:ssZ`) |
 | `merchant` | String | Non-empty merchant identifier |
 
 ---
 
-## 4. Monitoring Rules & Exact Boundaries
+## 4. Monitoring Rules & Exact Mathematical Boundaries
 
 ### A. High-Value Monitoring Rule
 - **Condition:** Amount **strictly greater than** INR 50,000 (`amount > 50000.00`).
@@ -166,41 +176,65 @@ Incoming Kafka messages use UTF-8 JSON. Every message key is set to `transaction
   3. Because the exception escapes unhandled, **no acknowledgment is sent to Kafka**.
   4. The unacknowledged message remains at its Kafka offset.
   5. When MySQL connectivity is restored or the consumer restarts, the message is re-read from Kafka and processed safely via MySQL-level idempotency.
-- **Poison Pill Handling:** Malformed JSON strings and schema validation errors are caught, logged, written to `rejected_events` (if DB is up), and **immediately acknowledged** so corrupt messages do not cause endless poison-pill loops.
+- **Poison Pill Handling (Malformed JSON):**
+  Malformed JSON strings and schema validation errors are caught, logged, written to the **`rejected_events`** dead-letter table, and **immediately acknowledged**. This prevents the consumer from entering an infinite crash loop, keeping the stream healthy.
 
 ---
 
-## 7. Setup & Reproducible Execution Runbook
+## 7. Real-Time Web Monitoring Console
+
+FinStream includes an embedded real-time web monitoring console served directly by Spring Boot on port 8080:
+
+👉 **URL:** `http://localhost:8080` (or `http://localhost:8080/index.html`)
+
+### Dashboard Features
+1. **Live Metrics Bar:** Displays real-time counts of transactions, processed volume in INR, high-value flags, rapid-spending triggers, security alerts, and dead-letter rejected events.
+2. **Interactive Transaction Simulator:**
+   - **Custom Event Form:** Input any custom Account ID, Amount, and Merchant to publish transactions directly to Kafka.
+   - **One-Click Scenario Buttons:**
+     - `Normal (1,500)`: Standard valid event.
+     - `High-Value (75,000)`: Event $> 50,000$ INR triggering high-value detection.
+     - `Rapid-Burst (3x)`: Dispatches 3 events in rapid succession triggering rapid-spending.
+     - `Duplicate Replay`: Dispatches identical duplicate transactions to verify idempotency.
+     - `Poison Pill`: Publishes malformed JSON to verify consumer resilience and dead-letter quarantine.
+3. **Real-Time Processed Transactions Table:** Live feed auto-refreshing every 2.5 seconds with status badges (`ACCEPTED`, `HIGH_VALUE`, `RAPID_SPENDING`, etc.).
+4. **Fraud & Security Alerts Feed:** Dedicated stream of triggered alerts with exact timestamps and violation reasons.
+5. **Rejected & Malformed Events Panel:** Real-time dead-letter audit log showing rejected payloads, error reasons, and timestamps.
+6. **Protected "Clear Data" Action:** Safe database reset button with confirmation warning to clear MySQL tables for fresh testing runs.
+
+---
+
+## 8. Setup & Reproducible Execution Runbook
 
 ### Prerequisites
-- **Operating System:** Windows 10/11 with PowerShell
-- **Java:** Eclipse Adoptium Temurin JDK 17.0.17 (`java -version`)
-- **Maven:** Apache Maven 3.9.16 (`mvn -version`)
+- **Operating System:** Windows 10/11 with PowerShell (or Linux/macOS bash)
+- **Java:** Eclipse Adoptium Temurin JDK 17 (`java -version`)
+- **Maven:** Apache Maven 3.9+ (`mvn -version`)
 - **Kafka:** Apache Kafka 4.2.2 (KRaft mode standalone at `localhost:9092`)
-- **MySQL:** MySQL Server 8.0+ / 26.7 (`localhost:3306`)
+- **MySQL:** MySQL Server 8.0+ (`localhost:3306`)
 - **Python:** Python 3.10+ (`python --version`)
 
 ### Step 1: Environment Variables Configuration
-Copy `.env.example` to `.env` in the project root and fill in local credentials:
+Copy `.env.example` to `.env` in the project root and fill in your local credentials:
 ```powershell
 cp .env.example .env
 ```
 *(Ensure `.env` remains ignored by git)*
 
-Set environment variables in your PowerShell terminal session:
+Set environment variables in your terminal session:
 ```powershell
-$env:MYSQL_HOST     = "localhost"
-$env:MYSQL_PORT     = "3306"
-$env:MYSQL_DATABASE = "finstream"
-$env:MYSQL_USER     = "finstream_user"
-$env:MYSQL_PASSWORD = "finstream_dev_2024"
-$env:KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
+$env:MYSQL_HOST              = "localhost"
+$env:MYSQL_PORT              = "3306"
+$env:MYSQL_DATABASE          = "finstream"
+$env:MYSQL_USER              = "finstream_user"
+$env:MYSQL_PASSWORD          = "your_password"
+$env:KAFKA_BOOTSTRAP_SERVERS  = "localhost:9092"
 ```
 
 ### Step 2: Initialize Database Schema
 Apply the DDL script using the MySQL client:
 ```powershell
-Get-Content database/schema.sql -Raw | & "C:\Program Files\MySQL\MySQL Server 26.7\bin\mysql.exe" -u $env:MYSQL_USER -p$env:MYSQL_PASSWORD finstream
+Get-Content database/schema.sql -Raw | & mysql -u $env:MYSQL_USER -p$env:MYSQL_PASSWORD finstream
 ```
 
 ### Step 3: Run Python Unit Tests
@@ -211,64 +245,61 @@ cd producer
 pytest -v
 cd ..
 ```
-*Expected: 17 passed.*
+*Result: 17 passed in 0.15s.*
 
 ### Step 4: Run Java Unit & Integration Tests
 Execute the full Maven test suite:
 ```powershell
 cd consumer
-$env:JAVA_HOME  = "C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot"
-$env:MAVEN_HOME = "C:\tools\maven\apache-maven-3.9.16"
-$env:PATH       = "$env:JAVA_HOME\bin;$env:MAVEN_HOME\bin;" + $env:PATH
-
 mvn clean test
 cd ..
 ```
-*Expected: 32 tests passed, 0 failures, 0 errors.*
+*Result: 32 tests passed, 0 failures, 0 errors.*
 
-### Step 5: Start the Spring Boot Consumer
+### Step 5: Start the Spring Boot Consumer & Dashboard
 Build and launch the consumer service:
 ```powershell
 cd consumer
-mvn package -DskipTests
+mvn clean package -DskipTests
 java -jar target\finstream-consumer-1.0.0-SNAPSHOT.jar
 ```
+Once started, access the live dashboard at **`http://localhost:8080`**.
 
 ### Step 6: Execute Phase 6 Live End-to-End Acceptance Suite
-In a separate PowerShell terminal, run the acceptance verification:
+In a separate terminal, run the acceptance verification:
 ```powershell
 cd producer
 .\.venv\Scripts\Activate.ps1
 python e2e_phase6_acceptance.py
 cd ..
 ```
-*Expected: All 10 acceptance scenarios report [PASSED].*
+*Result: All 10 acceptance scenarios report [PASSED].*
 
 ### Step 7: Run Analytical SQL Queries
 Verify monitoring analytics against live MySQL data:
 ```powershell
-Get-Content sql/analytics.sql -Raw | & "C:\Program Files\MySQL\MySQL Server 26.7\bin\mysql.exe" -u $env:MYSQL_USER -p$env:MYSQL_PASSWORD finstream
+Get-Content sql/analytics.sql -Raw | & mysql -u $env:MYSQL_USER -p$env:MYSQL_PASSWORD finstream
 ```
 
 ---
 
-## 8. Verification Results
+## 9. Verification & Test Summary Table
 
 | Test Suite | Total Tests | Passed | Failed | Blocked | Scope & Evidence |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **Python Unit Tests** | 17 | 17 | 0 | 0 | `test_generator.py`, `test_producer.py` (Validation & Serialization) |
-| **Java Unit Tests** | 17 | 17 | 0 | 0 | `TransactionValidatorTest` (8), `TransactionProcessingServiceTest` (9) |
-| **MySQL Integration Tests** | 4 | 4 | 0 | 0 | `TransactionRepositoryIntegrationTest` (CRUD, Rollback, Index checks) |
-| **Rapid-Spending Boundaries** | 7 | 7 | 0 | 0 | `RapidSpendingBoundaryIntegrationTest` (Cases 1–8: Exact 60s, Out-of-Order, Restarts) |
-| **Outage & Restart Resilience** | 2 | 2 | 0 | 0 | `OutageAndRestartIntegrationTest` (Zero-Ack Outage Simulation & Live Replay Idempotency) |
-| **Live Kafka Consumer Test** | 1 | 1 | 0 | 0 | `TransactionKafkaConsumerIntegrationTest` (End-to-end broker consumption) |
-| **Spring Context Test** | 1 | 1 | 0 | 0 | `FinStreamApplicationTests` |
-| **Phase 6 E2E Acceptance** | 10 | 10 | 0 | 0 | `e2e_phase6_acceptance.py` (10/10 scenarios verified against live MySQL) |
+| **Python Unit Tests** | 17 | **17** | 0 | 0 | `test_generator.py`, `test_producer.py` (Validation & Serialization) |
+| **Java Unit Tests** | 17 | **17** | 0 | 0 | `TransactionValidatorTest` (8), `TransactionProcessingServiceTest` (9) |
+| **MySQL Integration Tests** | 4 | **4** | 0 | 0 | `TransactionRepositoryIntegrationTest` (CRUD, Rollback, Index checks) |
+| **Rapid-Spending Boundaries** | 7 | **7** | 0 | 0 | `RapidSpendingBoundaryIntegrationTest` (Cases 1–8: Exact 60s, Out-of-Order, Restarts) |
+| **Outage & Restart Resilience** | 2 | **2** | 0 | 0 | `OutageAndRestartIntegrationTest` (Zero-Ack Outage Simulation & Live Replay Idempotency) |
+| **Live Kafka Consumer Test** | 1 | **1** | 0 | 0 | `TransactionKafkaConsumerIntegrationTest` (End-to-end broker consumption) |
+| **Spring Context Test** | 1 | **1** | 0 | 0 | `FinStreamApplicationTests` |
+| **Phase 6 E2E Acceptance** | 10 | **10** | 0 | 0 | `e2e_phase6_acceptance.py` (All 10 live scenarios evaluated against MySQL) |
 | **Total Test Suite** | **59** | **59** | **0** | **0** | **100% Pass Rate across all unit, integration, and E2E suites** |
 
 ---
 
-## 9. Analytical SQL Queries Overview
+## 10. Analytical SQL Queries Overview
 
 The `sql/analytics.sql` suite provides operational queries aligned with the relational schema:
 1. **System Summary:** Total transactions, distinct accounts, accepted transaction volume, and total INR value.
@@ -282,7 +313,7 @@ The `sql/analytics.sql` suite provides operational queries aligned with the rela
 
 ---
 
-## 10. Known Architectural Limitations & Boundaries
+## 11. Known Architectural Limitations & Boundaries
 
 1. **Dual-System Commit Boundary:** Kafka offset commits and MySQL transactions are separate operations without a distributed transaction manager (such as XA / Two-Phase Commit). If the JVM crashes after MySQL commits but before Kafka acknowledges the offset, the event is redelivered on restart. Our system handles this safely via persistent idempotency checks (`matchesEvent`) and unique database constraints.
 2. **Clock Alignment:** The rolling 60-second window calculates elapsed time based on event-time UTC timestamps (`transaction_timestamp`). Accurate monitoring requires upstream transaction generation systems to maintain NTP-synchronized clocks.

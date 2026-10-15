@@ -19,10 +19,12 @@ from confluent_kafka import Producer
 
 def query_mysql(sql: str) -> str:
     """Execute SQL query using mysql CLI and return stdout."""
+    mysql_user = os.getenv("MYSQL_USER", "finstream_user")
+    mysql_pwd = os.getenv("MYSQL_PASSWORD", "finstream_dev_2024")
     cmd = [
         r"C:\Program Files\MySQL\MySQL Server 26.7\bin\mysql.exe",
-        "-u", "finstream_user",
-        "-pfinstream_dev_2024",
+        "-u", mysql_user,
+        f"-p{mysql_pwd}",
         "finstream",
         "-N", "-s",
         "-e", sql,
