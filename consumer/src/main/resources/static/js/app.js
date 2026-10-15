@@ -66,12 +66,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       return `
         <tr>
-          <td><code style="color: var(--accent-cyan); font-family: 'JetBrains Mono', monospace;">${escapeHtml(tx.transaction_id)}</code></td>
-          <td><strong style="color: #cbd5e1;">${escapeHtml(tx.account_id)}</strong></td>
-          <td style="font-weight: 600;">₹${formattedAmount}</td>
-          <td style="color: var(--text-muted);">${escapeHtml(tx.merchant || 'N/A')}</td>
+          <td class="cell-mono" style="color: #60a5fa;">${escapeHtml(tx.transaction_id)}</td>
+          <td class="cell-mono">${escapeHtml(tx.account_id)}</td>
+          <td class="cell-mono" style="font-weight: 600;">₹${formattedAmount}</td>
+          <td style="color: var(--text-secondary);">${escapeHtml(tx.merchant || 'N/A')}</td>
           <td><span class="badge ${statusClass}">${escapeHtml(tx.status)}</span></td>
-          <td style="color: var(--text-dim); font-size: 0.75rem;">${timeStr}</td>
+          <td class="cell-mono" style="color: var(--text-dim);">${timeStr}</td>
         </tr>
       `;
     }).join('');
@@ -83,24 +83,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const list = await res.json();
 
     if (!list || list.length === 0) {
-      alertsContainer.innerHTML = '<div style="text-align: center; color: var(--text-dim); padding: 2rem;">No security or fraud alerts recorded yet.</div>';
+      alertsContainer.innerHTML = '<div style="text-align: center; color: var(--text-dim); padding: 2rem;">No alerts recorded.</div>';
       return;
     }
 
     alertsContainer.innerHTML = list.map(alert => {
-      const iconInfo = getAlertIconInfo(alert.alert_type);
+      const typeClass = getAlertTypeClass(alert.alert_type);
+      const cardClass = getAlertCardClass(alert.alert_type);
       const timeStr = formatTimestamp(alert.created_at);
 
       return `
-        <div class="alert-item">
-          <div class="alert-icon-box ${iconInfo.boxClass}">${iconInfo.icon}</div>
-          <div class="alert-body">
-            <div class="alert-top">
-              <span class="alert-title">${escapeHtml(alert.alert_type)}</span>
-              <span class="alert-time">${timeStr}</span>
-            </div>
-            <div class="alert-desc">${escapeHtml(alert.description)}</div>
+        <div class="alert-card ${cardClass}">
+          <div class="alert-header">
+            <span class="alert-type-label ${typeClass}">${escapeHtml(alert.alert_type)}</span>
+            <span class="alert-timestamp">${timeStr}</span>
           </div>
+          <div class="alert-description">${escapeHtml(alert.description)}</div>
+          <div class="alert-account-tag">Account: ${escapeHtml(alert.account_id || 'N/A')} | Tx: ${escapeHtml(alert.transaction_id || 'N/A')}</div>
         </div>
       `;
     }).join('');
@@ -109,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Dispatch Transactions ──────────────────────────────
   async function sendTransaction(payload) {
     try {
-      showToast('Publishing event to Kafka...', 'info');
+      showToast('Dispatching transaction to Kafka...', 'info');
       const res = await fetch('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -118,22 +117,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
 
       if (res.ok && data.status === 'SUCCESS') {
-        showToast(data.message || 'Transaction published to Kafka!', 'success');
-        // Immediate fetch after a brief delay to allow consumer to persist
-        setTimeout(fetchDashboardData, 600);
+        showToast(data.message || 'Transaction published to Kafka.', 'success');
+        setTimeout(fetchDashboardData, 500);
       } else {
-        showToast('Error: ' + (data.error || 'Failed to dispatch transaction'), 'error');
+        showToast('Error: ' + (data.error || 'Failed to dispatch transaction.'), 'error');
       }
     } catch (err) {
-      showToast('Network error while publishing: ' + err.message, 'error');
+      showToast('Network error: ' + err.message, 'error');
     }
   }
 
   // ── Event Handlers ─────────────────────────────────────
   btnSubmitTx.addEventListener('click', () => {
-    const account = inputAccount.value.trim() || 'ACC_DEMO';
+    const account = inputAccount.value.trim() || 'ACC101';
     const amount = parseFloat(inputAmount.value) || 1500.00;
-    const merchant = inputMerchant.value.trim() || 'Demo Store';
+    const merchant = inputMerchant.value.trim() || 'Cloud Retail Store';
 
     sendTransaction({
       scenario: 'NORMAL',
@@ -165,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnRefresh.addEventListener('click', () => {
     fetchDashboardData();
-    showToast('Dashboard data refreshed', 'info');
+    showToast('Dashboard refreshed.', 'info');
   });
 
   // ── Helpers ───────────────────────────────────────────
@@ -179,20 +177,29 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'badge-accepted';
   }
 
-  function getAlertIconInfo(type) {
-    if (!type) return { icon: '⚠️', boxClass: 'alert-icon-rs' };
+  function getAlertCardClass(type) {
+    if (!type) return '';
     const t = type.toUpperCase();
-    if (t.includes('HIGH_VALUE')) return { icon: '🚨', boxClass: 'alert-icon-hv' };
-    if (t.includes('RAPID_SPENDING')) return { icon: '⚡', boxClass: 'alert-icon-rs' };
-    if (t.includes('COLLISION')) return { icon: '🛡️', boxClass: 'alert-icon-col' };
-    return { icon: '⚠️', boxClass: 'alert-icon-rs' };
+    if (t.includes('HIGH_VALUE')) return 'alert-card-hv';
+    if (t.includes('RAPID_SPENDING')) return 'alert-card-rs';
+    if (t.includes('COLLISION')) return 'alert-card-col';
+    return '';
+  }
+
+  function getAlertTypeClass(type) {
+    if (!type) return '';
+    const t = type.toUpperCase();
+    if (t.includes('HIGH_VALUE')) return 'type-hv';
+    if (t.includes('RAPID_SPENDING')) return 'type-rs';
+    if (t.includes('COLLISION')) return 'type-col';
+    return '';
   }
 
   function formatTimestamp(ts) {
     if (!ts) return '';
     try {
       const d = new Date(ts);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' ' + d.toLocaleDateString();
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) + ' ' + d.toLocaleDateString();
     } catch {
       return ts;
     }
@@ -200,20 +207,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function showToast(message, type = 'info') {
     const toast = document.createElement('div');
-    toast.className = 'toast';
-    let icon = 'ℹ️';
-    if (type === 'success') icon = '✅';
-    if (type === 'error') icon = '❌';
-
-    toast.innerHTML = `<span>${icon}</span> <span>${escapeHtml(message)}</span>`;
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
     toastContainer.appendChild(toast);
 
     setTimeout(() => {
       toast.style.opacity = '0';
-      toast.style.transform = 'translateX(100%)';
-      toast.style.transition = 'all 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
-    }, 4000);
+      toast.style.transform = 'translateY(10px)';
+      toast.style.transition = 'all 0.2s ease';
+      setTimeout(() => toast.remove(), 250);
+    }, 3500);
   }
 
   function escapeHtml(str) {

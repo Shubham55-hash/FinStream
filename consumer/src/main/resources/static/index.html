@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FinStream — Real-Time Transaction Monitoring Dashboard</title>
-  <meta name="description" content="Real-time financial stream monitoring and fraud detection dashboard powered by Apache Kafka, Spring Boot, and MySQL.">
+  <title>FinStream — Transaction Monitoring Console</title>
+  <meta name="description" content="Real-time financial stream monitoring and fraud detection console powered by Apache Kafka, Spring Boot, and MySQL.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -15,76 +15,56 @@
     <!-- Top Header -->
     <header class="top-header">
       <div class="brand">
-        <div class="brand-icon">⚡</div>
-        <div class="brand-text">
-          <h1>FinStream Live Monitor</h1>
-          <p>Real-Time Financial Transaction Monitoring & Fraud Detection</p>
-        </div>
+        <h1>FinStream Monitoring Console</h1>
+        <p>Real-Time Financial Transaction Stream &amp; Fraud Detection Engine</p>
       </div>
       <div class="header-status">
-        <div class="pulse-indicator">
-          <div class="pulse-orb"></div>
-          <span id="connection-status">Live Connected (Kafka + MySQL)</span>
+        <div class="live-pill">
+          <div class="status-dot"></div>
+          <span id="connection-status">CONNECTED (KAFKA :9092 / MYSQL :3306)</span>
         </div>
-        <button id="btn-manual-refresh" class="btn-refresh" title="Refresh Live Data">
-          <span>🔄</span> Refresh
-        </button>
+        <button id="btn-manual-refresh" class="btn-header" type="button">Refresh</button>
       </div>
     </header>
 
     <!-- Metrics Cards Grid -->
     <section class="metrics-grid">
-      <div class="metric-card card-tx">
-        <div class="metric-header">
-          <span class="metric-title">Transactions</span>
-          <span class="metric-icon">💳</span>
-        </div>
+      <div class="metric-card">
+        <div class="metric-label">Transactions</div>
         <div id="stat-total-tx" class="metric-value">0</div>
         <div class="metric-sub">Persisted in MySQL</div>
       </div>
 
-      <div class="metric-card card-vol">
-        <div class="metric-header">
-          <span class="metric-title">Total Volume</span>
-          <span class="metric-icon">₹</span>
-        </div>
+      <div class="metric-card">
+        <div class="metric-label">Total Volume (INR)</div>
         <div id="stat-total-vol" class="metric-value">₹0.00</div>
-        <div class="metric-sub">Processed Volume (INR)</div>
+        <div class="metric-sub">Processed Event Volume</div>
       </div>
 
-      <div class="metric-card card-hv">
-        <div class="metric-header">
-          <span class="metric-title">High-Value Flags</span>
-          <span class="metric-icon">🚨</span>
-        </div>
+      <div class="metric-card">
+        <div class="metric-label">High-Value Flags</div>
         <div id="stat-hv-count" class="metric-value">0</div>
         <div class="metric-sub">&gt; 50,000 INR Rule</div>
       </div>
 
-      <div class="metric-card card-rs">
-        <div class="metric-header">
-          <span class="metric-title">Rapid-Spending</span>
-          <span class="metric-icon">⚡</span>
-        </div>
+      <div class="metric-card">
+        <div class="metric-label">Rapid-Spending Flags</div>
         <div id="stat-rs-count" class="metric-value">0</div>
-        <div class="metric-sub">&ge; 3 Tx in Rolling 60s Window</div>
+        <div class="metric-sub">&ge; 3 Tx in 60s Window</div>
       </div>
 
-      <div class="metric-card card-alt">
-        <div class="metric-header">
-          <span class="metric-title">Total Alerts</span>
-          <span class="metric-icon">🛡️</span>
-        </div>
+      <div class="metric-card">
+        <div class="metric-label">Total Alerts</div>
         <div id="stat-alerts-count" class="metric-value">0</div>
-        <div class="metric-sub">Security & Fraud Detections</div>
+        <div class="metric-sub">Security &amp; Fraud Detections</div>
       </div>
     </section>
 
     <!-- Control Center / Action Panel -->
     <section class="control-panel">
       <div class="panel-header">
-        <h2><span>🎮</span> Manual Event Injector & Test Simulator</h2>
-        <span class="metric-sub">Publish live events directly to Kafka topic <code>transactions</code></span>
+        <span class="panel-title">Transaction Event Generator</span>
+        <span class="panel-caption">Publish events directly to Kafka topic <code>transactions</code></span>
       </div>
 
       <div class="trigger-grid">
@@ -92,7 +72,7 @@
         <form id="custom-tx-form" class="custom-form" onsubmit="return false;">
           <div class="form-group">
             <label for="input-account">Account ID</label>
-            <input type="text" id="input-account" class="form-input" placeholder="e.g. ACC101" value="ACC101">
+            <input type="text" id="input-account" class="form-input" placeholder="ACC101" value="ACC101">
           </div>
           <div class="form-group">
             <label for="input-amount">Amount (INR)</label>
@@ -100,30 +80,18 @@
           </div>
           <div class="form-group">
             <label for="input-merchant">Merchant</label>
-            <input type="text" id="input-merchant" class="form-input" placeholder="Merchant Name" value="Cloud Retail Store">
+            <input type="text" id="input-merchant" class="form-input" placeholder="Retail Merchant" value="Cloud Retail Store">
           </div>
-          <button id="btn-submit-tx" class="btn-primary" type="button">
-            <span>🚀</span> Send Tx
-          </button>
+          <button id="btn-submit-tx" class="btn-primary" type="button">Send Transaction</button>
         </form>
 
         <!-- Quick Scenario Buttons -->
-        <div class="quick-buttons">
-          <button id="btn-quick-normal" class="btn-quick" title="Send a normal transaction under 50k">
-            🟢 Normal (₹1,500)
-          </button>
-          <button id="btn-quick-hv" class="btn-quick btn-quick-hv" title="Send a transaction over 50,000 INR">
-            🚨 High-Value (₹75,000)
-          </button>
-          <button id="btn-quick-rs" class="btn-quick btn-quick-rs" title="Burst 3 transactions in rapid succession">
-            ⚡ Rapid-Burst (3x)
-          </button>
-          <button id="btn-quick-dup" class="btn-quick btn-quick-dup" title="Replay identical transaction ID to verify idempotency">
-            🔁 Duplicate Test
-          </button>
-          <button id="btn-quick-poison" class="btn-quick" title="Send malformed JSON to verify consumer does not crash">
-            ⚠️ Poison Pill
-          </button>
+        <div class="scenario-buttons">
+          <button id="btn-quick-normal" class="btn-scenario btn-scenario-normal" type="button">Normal (1,500)</button>
+          <button id="btn-quick-hv" class="btn-scenario btn-scenario-hv" type="button">High-Value (75,000)</button>
+          <button id="btn-quick-rs" class="btn-scenario btn-scenario-rs" type="button">Rapid-Burst (3x)</button>
+          <button id="btn-quick-dup" class="btn-scenario btn-scenario-dup" type="button">Duplicate Replay</button>
+          <button id="btn-quick-poison" class="btn-scenario btn-scenario-poison" type="button">Poison Pill</button>
         </div>
       </div>
     </section>
@@ -131,13 +99,13 @@
     <!-- Main Content: Transactions Feed & Alerts Feed -->
     <main class="content-grid">
       <!-- Live Transactions Feed -->
-      <section class="card-panel">
-        <div class="card-panel-header">
-          <h2><span>📋</span> Live Processed Transactions</h2>
-          <span class="badge-count" id="tx-table-count">Latest 20</span>
+      <section class="panel-section">
+        <div class="panel-section-header">
+          <h2>Processed Transactions</h2>
+          <span class="section-tag" id="tx-table-count">LATEST 25</span>
         </div>
         <div class="table-wrapper">
-          <table class="styled-table" id="transactions-table">
+          <table class="data-table" id="transactions-table">
             <thead>
               <tr>
                 <th>Tx ID</th>
@@ -145,7 +113,7 @@
                 <th>Amount</th>
                 <th>Merchant</th>
                 <th>Status</th>
-                <th>Event Time (UTC)</th>
+                <th>Timestamp (UTC)</th>
               </tr>
             </thead>
             <tbody id="transactions-tbody">
@@ -158,13 +126,13 @@
       </section>
 
       <!-- Live Security & Fraud Alerts Feed -->
-      <section class="card-panel">
-        <div class="card-panel-header">
-          <h2><span>🚨</span> Fraud & Security Alerts</h2>
-          <span class="badge-count" id="alerts-count-badge">Real-Time</span>
+      <section class="panel-section">
+        <div class="panel-section-header">
+          <h2>Alerts &amp; Violations</h2>
+          <span class="section-tag" id="alerts-count-badge">REAL-TIME</span>
         </div>
         <div class="alerts-list" id="alerts-container">
-          <div style="text-align: center; color: var(--text-dim); padding: 2rem;">No alerts detected yet.</div>
+          <div style="text-align: center; color: var(--text-dim); padding: 2rem;">No alerts recorded yet.</div>
         </div>
       </section>
     </main>
