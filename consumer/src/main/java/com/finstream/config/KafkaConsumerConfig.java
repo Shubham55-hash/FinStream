@@ -24,7 +24,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Configuration for Apache Kafka consumers in FinStream.
+ * Configuration for Apache Kafka consumers and producers in FinStream.
  * <p>
  * Selected Offset-Commit Strategy: MANUAL_IMMEDIATE
  * Messages are acknowledged explicitly via Acknowledgment.acknowledge() ONLY AFTER

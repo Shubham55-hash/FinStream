@@ -19,6 +19,7 @@ import java.util.Optional;
 
 /**
  * Repository interface for MySQL persistence using JdbcTemplate.
+ * Provides transactional queries for persistence, monitoring, and live dashboard stats.
  */
 @Repository
 public class TransactionRepository {
