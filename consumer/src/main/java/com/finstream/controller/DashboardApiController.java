@@ -57,6 +57,12 @@ public class DashboardApiController {
         return ResponseEntity.ok(transactionRepository.getRecentAlerts(limit));
     }
 
+    @GetMapping("/rejected")
+    public ResponseEntity<List<Map<String, Object>>> getRecentRejected(
+            @RequestParam(defaultValue = "20") int limit) {
+        return ResponseEntity.ok(transactionRepository.getRecentRejected(limit));
+    }
+
     @PostMapping("/clear")
     public ResponseEntity<Map<String, Object>> clearData() {
         Map<String, Object> response = new HashMap<>();

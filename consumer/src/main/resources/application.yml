@@ -10,6 +10,7 @@ spring:
     password: ${MYSQL_PASSWORD:finstream_dev_2024}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
+      connection-init-sql: "SET time_zone = '+00:00'"
       maximum-pool-size: 10
       minimum-idle: 2
       connection-timeout: 5000

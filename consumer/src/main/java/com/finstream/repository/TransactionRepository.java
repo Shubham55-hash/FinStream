@@ -130,19 +130,36 @@ public class TransactionRepository {
 
     /**
      * Fetch recent transactions for live dashboard monitoring.
+     * Formats timestamps explicitly as ISO-8601 UTC strings ending with 'Z'.
      */
     public List<Map<String, Object>> getRecentTransactions(int limit) {
-        String sql = "SELECT transaction_id, account_id, amount, currency, transaction_timestamp, merchant, status, created_at " +
+        String sql = "SELECT transaction_id, account_id, amount, currency, " +
+                "DATE_FORMAT(transaction_timestamp, '%Y-%m-%dT%H:%i:%sZ') AS transaction_timestamp, " +
+                "merchant, status, " +
+                "DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at " +
                 "FROM transactions ORDER BY id DESC LIMIT ?";
         return jdbcTemplate.queryForList(sql, limit);
     }
 
     /**
      * Fetch recent alerts for live dashboard monitoring.
+     * Formats created_at explicitly as an ISO-8601 UTC string ending with 'Z'.
      */
     public List<Map<String, Object>> getRecentAlerts(int limit) {
-        String sql = "SELECT id, transaction_id, account_id, alert_type, description, created_at " +
+        String sql = "SELECT id, transaction_id, account_id, alert_type, description, " +
+                "DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at " +
                 "FROM transaction_alerts ORDER BY id DESC LIMIT ?";
+        return jdbcTemplate.queryForList(sql, limit);
+    }
+
+    /**
+     * Fetch recent rejected events (e.g. Poison Pills, validation errors).
+     * Formats created_at explicitly as an ISO-8601 UTC string ending with 'Z'.
+     */
+    public List<Map<String, Object>> getRecentRejected(int limit) {
+        String sql = "SELECT id, transaction_id, payload, reason, rejection_type, " +
+                "DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at " +
+                "FROM rejected_events ORDER BY id DESC LIMIT ?";
         return jdbcTemplate.queryForList(sql, limit);
     }
 

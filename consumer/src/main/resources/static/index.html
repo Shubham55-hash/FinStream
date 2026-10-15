@@ -59,6 +59,12 @@
         <div id="stat-alerts-count" class="metric-value">0</div>
         <div class="metric-sub">Security &amp; Fraud Detections</div>
       </div>
+
+      <div class="metric-card">
+        <div class="metric-label">Rejected Events</div>
+        <div id="stat-rejected-count" class="metric-value">0</div>
+        <div class="metric-sub">Malformed &amp; Invalid Payloads</div>
+      </div>
     </section>
 
     <!-- Control Center / Action Panel -->
@@ -137,6 +143,33 @@
         </div>
       </section>
     </main>
+
+    <!-- Rejected & Malformed Events Panel -->
+    <section class="panel-section" style="margin-top: 1.5rem;">
+      <div class="panel-section-header">
+        <h2>Rejected &amp; Malformed Events (Dead-Letter Quarantine)</h2>
+        <span class="section-tag" id="rejected-count-badge">AUDIT LOG</span>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table" id="rejected-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Rejection Type</th>
+              <th>Tx ID / Key</th>
+              <th>Failure Reason</th>
+              <th>Raw Payload</th>
+              <th>Timestamp (UTC)</th>
+            </tr>
+          </thead>
+          <tbody id="rejected-tbody">
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">No rejected events recorded.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
   <!-- Toast Container -->

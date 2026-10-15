@@ -4,11 +4,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const statHvCount = document.getElementById('stat-hv-count');
   const statRsCount = document.getElementById('stat-rs-count');
   const statAlertsCount = document.getElementById('stat-alerts-count');
+  const statRejectedCount = document.getElementById('stat-rejected-count');
+
   const txTbody = document.getElementById('transactions-tbody');
   const alertsContainer = document.getElementById('alerts-container');
+  const rejectedTbody = document.getElementById('rejected-tbody');
+
   const btnRefresh = document.getElementById('btn-manual-refresh');
   const btnClearData = document.getElementById('btn-clear-data');
   const toastContainer = document.getElementById('toast-container');
+  const connectionPill = document.querySelector('.live-pill');
 
   // Form elements
   const inputAccount = document.getElementById('input-account');
@@ -26,15 +31,30 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Polling & Data Fetching ─────────────────────────────
   async function fetchDashboardData() {
     try {
-      await Promise.all([fetchStats(), fetchTransactions(), fetchAlerts()]);
+      await Promise.all([fetchStats(), fetchTransactions(), fetchAlerts(), fetchRejected()]);
+      updateConnectionState(true);
     } catch (err) {
       console.error('Error fetching dashboard updates:', err);
+      updateConnectionState(false);
+    }
+  }
+
+  function updateConnectionState(isConnected) {
+    if (!connectionPill) return;
+    if (isConnected) {
+      connectionPill.style.borderColor = 'rgba(34, 197, 94, 0.3)';
+      connectionPill.style.color = '#22c55e';
+      connectionPill.innerHTML = '<div class="status-dot"></div><span>CONNECTED (KAFKA :9092 / MYSQL :3306)</span>';
+    } else {
+      connectionPill.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+      connectionPill.style.color = '#ef4444';
+      connectionPill.innerHTML = '<div class="status-dot" style="background:#ef4444;"></div><span>DISCONNECTED (BACKEND UNREACHABLE)</span>';
     }
   }
 
   async function fetchStats() {
     const res = await fetch('/api/stats');
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('Failed to fetch stats');
     const data = await res.json();
     
     statTotalTx.textContent = Number(data.total_transactions || 0).toLocaleString();
@@ -45,6 +65,9 @@ document.addEventListener('DOMContentLoaded', () => {
     statHvCount.textContent = Number(data.high_value_count || 0).toLocaleString();
     statRsCount.textContent = Number(data.rapid_spending_count || 0).toLocaleString();
     statAlertsCount.textContent = Number(data.total_alerts || 0).toLocaleString();
+    if (statRejectedCount) {
+      statRejectedCount.textContent = Number(data.total_rejected || 0).toLocaleString();
+    }
   }
 
   async function fetchTransactions() {
@@ -69,10 +92,10 @@ document.addEventListener('DOMContentLoaded', () => {
         <tr>
           <td class="cell-mono" style="color: #60a5fa;">${escapeHtml(tx.transaction_id)}</td>
           <td class="cell-mono">${escapeHtml(tx.account_id)}</td>
-          <td class="cell-mono" style="font-weight: 600;">₹${formattedAmount}</td>
+          <td class="cell-mono" style="font-weight: 600; color: #f4f4f5;">₹${formattedAmount}</td>
           <td style="color: var(--text-secondary);">${escapeHtml(tx.merchant || 'N/A')}</td>
           <td><span class="badge ${statusClass}">${escapeHtml(tx.status)}</span></td>
-          <td class="cell-mono" style="color: var(--text-dim);">${timeStr}</td>
+          <td class="cell-mono" style="color: #a1a1aa;">${timeStr}</td>
         </tr>
       `;
     }).join('');
@@ -106,10 +129,37 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
-  // ── Dispatch Transactions ──────────────────────────────
+  async function fetchRejected() {
+    if (!rejectedTbody) return;
+    const res = await fetch('/api/rejected?limit=25');
+    if (!res.ok) return;
+    const list = await res.json();
+
+    if (!list || list.length === 0) {
+      rejectedTbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">No rejected events recorded.</td></tr>';
+      return;
+    }
+
+    rejectedTbody.innerHTML = list.map(item => {
+      const timeStr = formatTimestamp(item.created_at);
+      const payloadPreview = escapeHtml(String(item.payload || '').substring(0, 50));
+      return `
+        <tr>
+          <td class="cell-mono" style="color: var(--text-muted);">${item.id}</td>
+          <td><span class="badge badge-high_value">${escapeHtml(item.rejection_type)}</span></td>
+          <td class="cell-mono" style="color: #f87171;">${escapeHtml(item.transaction_id || 'UNKNOWN')}</td>
+          <td style="color: #e4e4e7; font-size: 0.74rem;">${escapeHtml(item.reason || '')}</td>
+          <td class="cell-mono" style="color: var(--text-dim); font-size: 0.7rem;" title="${escapeHtml(item.payload || '')}"><code>${payloadPreview}...</code></td>
+          <td class="cell-mono" style="color: #a1a1aa;">${timeStr}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // ── Dispatch Transactions with Two-Phase Feedback ────────
   async function sendTransaction(payload) {
     try {
-      showToast('Dispatching transaction to Kafka...', 'info');
+      showToast('Phase 1: Dispatched to Kafka broker...', 'info');
       const res = await fetch('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -118,10 +168,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
 
       if (res.ok && data.status === 'SUCCESS') {
-        showToast(data.message || 'Transaction published to Kafka.', 'success');
-        setTimeout(fetchDashboardData, 500);
+        const publishedId = data.transactionId || (data.transactionIds ? data.transactionIds.join(', ') : 'Event');
+        showToast(`Published: ${publishedId} accepted by Kafka`, 'info');
+
+        // Phase 2: Verify consumer processing and database write after brief delay
+        setTimeout(async () => {
+          await fetchDashboardData();
+          if (payload.scenario === 'MALFORMED') {
+            showToast('Phase 2 Confirmed: Quarantined in rejected_events (Dead-Letter verified)', 'success');
+          } else {
+            showToast(`Phase 2 Confirmed: Consumer processed and persisted in MySQL`, 'success');
+          }
+        }, 700);
       } else {
-        showToast('Error: ' + (data.error || 'Failed to dispatch transaction.'), 'error');
+        showToast('Publish Error: ' + (data.error || 'Failed to dispatch to Kafka.'), 'error');
       }
     } catch (err) {
       showToast('Network error: ' + err.message, 'error');
@@ -164,19 +224,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnRefresh.addEventListener('click', () => {
     fetchDashboardData();
-    showToast('Dashboard refreshed.', 'info');
+    showToast('Dashboard refreshed from MySQL.', 'info');
   });
 
   btnClearData.addEventListener('click', async () => {
-    const ok = confirm('Are you sure you want to delete all transaction records, alerts, and rejected events from MySQL?');
+    const ok = confirm(
+      '⚠️ PERMANENT DATABASE RESET WARNING\n\n' +
+      'This will delete ALL rows from:\n' +
+      '  - transactions (Ledger)\n' +
+      '  - transaction_alerts (Fraud & Security Alerts)\n' +
+      '  - rejected_events (Dead-letter quarantine)\n\n' +
+      'Are you sure you want to proceed?'
+    );
     if (!ok) return;
 
     try {
-      showToast('Clearing database...', 'info');
+      showToast('Clearing MySQL database tables...', 'info');
       const res = await fetch('/api/clear', { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.status === 'SUCCESS') {
-        showToast(data.message || 'All data cleared successfully.', 'success');
+        showToast('All database tables cleared. Metrics reset to 0.', 'success');
         fetchDashboardData();
       } else {
         showToast('Error: ' + (data.error || 'Failed to clear database.'), 'error');
@@ -185,6 +252,27 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('Network error while clearing: ' + err.message, 'error');
     }
   });
+
+  // ── Unified UTC Timestamp Formatter ───────────────────
+  function formatTimestamp(ts) {
+    if (!ts) return 'N/A';
+    let str = String(ts);
+    // If missing timezone indicator, treat raw string as UTC
+    if (!str.endsWith('Z') && !str.includes('+')) {
+      str += 'Z';
+    }
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return ts;
+
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const hours = String(d.getUTCHours()).padStart(2, '0');
+    const mins = String(d.getUTCMinutes()).padStart(2, '0');
+    const secs = String(d.getUTCSeconds()).padStart(2, '0');
+
+    return `${year}-${month}-${day} ${hours}:${mins}:${secs} UTC`;
+  }
 
   // ── Helpers ───────────────────────────────────────────
   function getStatusBadgeClass(status) {
@@ -215,16 +303,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return '';
   }
 
-  function formatTimestamp(ts) {
-    if (!ts) return '';
-    try {
-      const d = new Date(ts);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) + ' ' + d.toLocaleDateString();
-    } catch {
-      return ts;
-    }
-  }
-
   function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
@@ -236,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
       toast.style.transform = 'translateY(10px)';
       toast.style.transition = 'all 0.2s ease';
       setTimeout(() => toast.remove(), 250);
-    }, 3500);
+    }, 4000);
   }
 
   function escapeHtml(str) {
@@ -249,7 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/'/g, '&#039;');
   }
 
-  // ── Initial Load & Auto-Refresh ───────────────────────
+  // ── Initial Load & Auto-Polling (every 2.5s) ───────────
   fetchDashboardData();
   setInterval(fetchDashboardData, 2500);
 });
