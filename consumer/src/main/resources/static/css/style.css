@@ -127,6 +127,17 @@ body {
   border-color: #3f3f46;
 }
 
+.btn-danger {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: var(--status-high-value);
+  color: #ffffff;
+}
+
 /* ── Metric Cards Grid ─────────────────────────────────── */
 .metrics-grid {
   display: grid;

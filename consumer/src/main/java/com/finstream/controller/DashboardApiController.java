@@ -57,6 +57,22 @@ public class DashboardApiController {
         return ResponseEntity.ok(transactionRepository.getRecentAlerts(limit));
     }
 
+    @PostMapping("/clear")
+    public ResponseEntity<Map<String, Object>> clearData() {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            transactionRepository.clearAllData();
+            response.put("status", "SUCCESS");
+            response.put("message", "All transactions, alerts, and rejected events have been cleared from MySQL.");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Failed to clear database data", e);
+            response.put("status", "ERROR");
+            response.put("error", e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
     @PostMapping("/send")
     public ResponseEntity<Map<String, Object>> sendTransaction(@RequestBody(required = false) Map<String, Object> request) {
         Map<String, Object> response = new HashMap<>();

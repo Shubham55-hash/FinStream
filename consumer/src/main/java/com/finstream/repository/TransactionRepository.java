@@ -166,4 +166,15 @@ public class TransactionRepository {
         stats.put("total_rejected", totalRejected != null ? totalRejected : 0);
         return stats;
     }
+
+    /**
+     * Clear all records from transactions, alerts, and rejected events tables.
+     * Useful for manual demo resetting from the web dashboard.
+     */
+    public void clearAllData() {
+        jdbcTemplate.update("DELETE FROM transaction_alerts");
+        jdbcTemplate.update("DELETE FROM rejected_events");
+        jdbcTemplate.update("DELETE FROM transactions");
+        logger.info("[DB RESET] Cleared all data from transaction_alerts, rejected_events, and transactions");
+    }
 }

@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const txTbody = document.getElementById('transactions-tbody');
   const alertsContainer = document.getElementById('alerts-container');
   const btnRefresh = document.getElementById('btn-manual-refresh');
+  const btnClearData = document.getElementById('btn-clear-data');
   const toastContainer = document.getElementById('toast-container');
 
   // Form elements
@@ -164,6 +165,25 @@ document.addEventListener('DOMContentLoaded', () => {
   btnRefresh.addEventListener('click', () => {
     fetchDashboardData();
     showToast('Dashboard refreshed.', 'info');
+  });
+
+  btnClearData.addEventListener('click', async () => {
+    const ok = confirm('Are you sure you want to delete all transaction records, alerts, and rejected events from MySQL?');
+    if (!ok) return;
+
+    try {
+      showToast('Clearing database...', 'info');
+      const res = await fetch('/api/clear', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.status === 'SUCCESS') {
+        showToast(data.message || 'All data cleared successfully.', 'success');
+        fetchDashboardData();
+      } else {
+        showToast('Error: ' + (data.error || 'Failed to clear database.'), 'error');
+      }
+    } catch (err) {
+      showToast('Network error while clearing: ' + err.message, 'error');
+    }
   });
 
   // ── Helpers ───────────────────────────────────────────
