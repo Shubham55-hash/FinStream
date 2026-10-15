@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS transaction_alerts (
     alert_type VARCHAR(32) NOT NULL,
     description VARCHAR(255) NOT NULL,
     created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT uk_alerts_tx_type UNIQUE (transaction_id, alert_type),
     INDEX idx_alerts_transaction_id (transaction_id),
     INDEX idx_alerts_account_id (account_id),
     INDEX idx_alerts_created_at (created_at)

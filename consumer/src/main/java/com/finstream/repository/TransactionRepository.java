@@ -95,7 +95,7 @@ public class TransactionRepository {
      */
     public void saveAlert(String transactionId, String accountId, String alertType, String description) {
         String sql = "INSERT INTO transaction_alerts (transaction_id, account_id, alert_type, description) " +
-                "VALUES (?, ?, ?, ?)";
+                "VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE description = VALUES(description)";
         jdbcTemplate.update(sql, transactionId, accountId, alertType, description);
         logger.info("[DB ALERT] Recorded alert {} for txId='{}', accountId='{}'", alertType, transactionId, accountId);
     }

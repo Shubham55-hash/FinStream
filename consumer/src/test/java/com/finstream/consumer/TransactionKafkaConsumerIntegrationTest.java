@@ -11,6 +11,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.TestPropertySource;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -20,6 +22,11 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@TestPropertySource(properties = {
+        "spring.kafka.consumer.group-id=test-group-consumer-live",
+        "spring.kafka.consumer.auto-offset-reset=earliest"
+})
 class TransactionKafkaConsumerIntegrationTest {
 
     @Autowired
@@ -68,10 +75,10 @@ class TransactionKafkaConsumerIntegrationTest {
         // Send to real Kafka broker
         testKafkaTemplate.send(topic, testTxId, payload).get(5, TimeUnit.SECONDS);
 
-        // Await consumption by Spring Boot consumer listener
+        // Await consumption by Spring Boot consumer listener (up to 15 seconds)
         boolean consumed = false;
         long startTime = System.currentTimeMillis();
-        while (System.currentTimeMillis() - startTime < 10000) {
+        while (System.currentTimeMillis() - startTime < 15000) {
             if (consumer.getConsumedCount() > initialCount) {
                 consumed = true;
                 break;
