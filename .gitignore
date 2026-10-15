@@ -1,0 +1,41 @@
+# ── Secrets and local config ───────────────────────────────
+.env
+
+# ── Python ─────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Java / Maven ───────────────────────────────────────────
+target/
+*.class
+*.jar
+*.war
+*.ear
+.mvn/wrapper/maven-wrapper.jar
+
+# ── IDE ────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Kafka / logs ───────────────────────────────────────────
+*.log
+kafka-logs/
+
+# ── OS ─────────────────────────────────────────────────────
+desktop.ini

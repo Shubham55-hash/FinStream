@@ -1,0 +1,10 @@
+# FinStream Producer Dependencies
+# Kafka client for Python
+confluent-kafka>=2.4.0,<3.0.0
+
+# Environment variables management
+python-dotenv>=1.0.1
+
+# Testing framework
+pytest>=8.3.0
+pytest-mock>=3.14.0
