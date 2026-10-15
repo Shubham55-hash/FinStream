@@ -23,7 +23,12 @@ import java.util.Map;
  * <p>
  * Selected Offset-Commit Strategy: MANUAL_IMMEDIATE
  * Messages are acknowledged explicitly via Acknowledgment.acknowledge() ONLY AFTER
- * validation and processing have completed, preventing message loss if the consumer crashes.
+ * validation, monitoring, and database persistence have completed.
+ * <p>
+ * Error Handling:
+ * In case of transient database errors, Spring Kafka's DefaultErrorHandler
+ * retries up to 3 times with a 500ms backoff before stopping, leaving the uncommitted
+ * offset in Kafka for safe recovery upon system restoration.
  */
 @Configuration
 @EnableKafka
@@ -46,12 +51,11 @@ public class KafkaConsumerConfig {
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
-        // Explicit manual acknowledgment; disable automatic background offset commits
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 
-        logger.info("Configured Kafka ConsumerFactory connected to {} with groupId '{}'", bootstrapServers, groupId);
+        logger.info("Configured Kafka ConsumerFactory: servers={}, groupId='{}'", bootstrapServers, groupId);
         return new DefaultKafkaConsumerFactory<>(props);
     }
 
@@ -62,14 +66,14 @@ public class KafkaConsumerConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
 
-        // AckMode.MANUAL_IMMEDIATE: commits offset synchronously to Kafka broker immediately when ack is invoked
+        // MANUAL_IMMEDIATE: Commits offset synchronously right after successful processing
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
 
-        // Default error handler with 2 retries (1000ms delay) for unexpected transport/broker issues
+        // Bounded retries: 3 attempts with 500ms delay for recoverable errors
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(
-                (record, exception) -> logger.error("Exhausted retries for record at topic={}, partition={}, offset={}, key={}. Reason: {}",
+                (record, exception) -> logger.error("[RETRY EXHAUSTED] Error processing record topic={}, partition={}, offset={}, key={}: {}",
                         record.topic(), record.partition(), record.offset(), record.key(), exception.getMessage()),
-                new FixedBackOff(1000L, 2L)
+                new FixedBackOff(500L, 3L)
         );
         factory.setCommonErrorHandler(errorHandler);
 

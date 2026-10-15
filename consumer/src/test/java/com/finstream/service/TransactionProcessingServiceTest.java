@@ -3,122 +3,211 @@ package com.finstream.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.finstream.model.ProcessingResult;
+import com.finstream.model.TransactionEntity;
 import com.finstream.model.TransactionEvent;
+import com.finstream.repository.TransactionRepository;
 import com.finstream.validation.TransactionValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.TransientDataAccessResourceException;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class TransactionProcessingServiceTest {
 
-    private TransactionProcessingService service;
+    @Mock
+    private TransactionRepository repository;
+
+    private TransactionValidator validator;
     private ObjectMapper objectMapper;
+    private TransactionProcessingService service;
+
+    private final BigDecimal threshold = new BigDecimal("50000.00");
+    private final int rapidCount = 3;
+    private final int rapidWindowSeconds = 60;
 
     @BeforeEach
     void setUp() {
-        TransactionValidator validator = new TransactionValidator();
+        validator = new TransactionValidator();
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        service = new TransactionProcessingService(validator, objectMapper, new BigDecimal("50000.00"));
+        service = new TransactionProcessingService(
+                validator,
+                repository,
+                objectMapper,
+                threshold,
+                rapidCount,
+                rapidWindowSeconds
+        );
     }
 
-    private TransactionEvent createEvent(String txId, BigDecimal amount) {
+    private TransactionEvent createEvent(String txId, String accountId, BigDecimal amount, OffsetDateTime timestamp) {
         return new TransactionEvent(
                 txId,
-                "ACC101",
+                accountId,
                 amount,
                 "INR",
-                OffsetDateTime.parse("2026-10-15T12:30:00Z"),
+                timestamp,
                 "Demo Store"
         );
     }
 
     @Test
-    void testProcessValidNormalTransaction() {
-        TransactionEvent event = createEvent("TX1001", new BigDecimal("2500.00"));
-        ProcessingResult result = service.process(event);
+    void testProcessNormalTransaction() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-10-15T12:30:00Z");
+        TransactionEvent event = createEvent("TX1001", "ACC101", new BigDecimal("2500.00"), now);
+
+        when(repository.findByTransactionId("TX1001")).thenReturn(Optional.empty());
+        when(repository.countTransactionsInWindow(eq("ACC101"), any(), any())).thenReturn(0);
+
+        ProcessingResult result = service.process(event, null);
 
         assertEquals("TX1001", result.getTransactionId());
         assertEquals(ProcessingResult.Status.ACCEPTED, result.getStatus());
         assertFalse(result.isHighValueFlag());
+        assertFalse(result.isRapidSpendingFlag());
+
+        verify(repository).saveTransaction(any(TransactionEntity.class));
+        verify(repository, never()).saveAlert(any(), any(), any(), any());
     }
 
     @Test
-    void testProcessHighValueTransaction() {
-        TransactionEvent event = createEvent("TX1002", new BigDecimal("75000.50"));
-        ProcessingResult result = service.process(event);
+    void testProcessHighValueTransactionStrictlyGreaterThanThreshold() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-10-15T12:30:00Z");
+        TransactionEvent event = createEvent("TX1002", "ACC101", new BigDecimal("50000.01"), now);
 
-        assertEquals("TX1002", result.getTransactionId());
+        when(repository.findByTransactionId("TX1002")).thenReturn(Optional.empty());
+        when(repository.countTransactionsInWindow(eq("ACC101"), any(), any())).thenReturn(0);
+
+        ProcessingResult result = service.process(event, null);
+
         assertEquals(ProcessingResult.Status.FLAGGED_HIGH_VALUE, result.getStatus());
         assertTrue(result.isHighValueFlag());
+
+        verify(repository).saveTransaction(argThat(entity -> "HIGH_VALUE".equals(entity.getStatus())));
+        verify(repository).saveAlert(eq("TX1002"), eq("ACC101"), eq("HIGH_VALUE"), anyString());
     }
 
     @Test
-    void testProcessBoundaryTransactionAtThreshold() {
-        // At exactly 50000.00, it is not strictly greater than 50000.00
-        TransactionEvent event = createEvent("TX1003", new BigDecimal("50000.00"));
-        ProcessingResult result = service.process(event);
+    void testProcessBoundaryTransactionAtExactlyThresholdDoesNotTrigger() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-10-15T12:30:00Z");
+        TransactionEvent event = createEvent("TX1003", "ACC101", new BigDecimal("50000.00"), now);
+
+        when(repository.findByTransactionId("TX1003")).thenReturn(Optional.empty());
+        when(repository.countTransactionsInWindow(eq("ACC101"), any(), any())).thenReturn(0);
+
+        ProcessingResult result = service.process(event, null);
 
         assertEquals(ProcessingResult.Status.ACCEPTED, result.getStatus());
         assertFalse(result.isHighValueFlag());
+        verify(repository, never()).saveAlert(any(), any(), eq("HIGH_VALUE"), any());
     }
 
     @Test
-    void testProcessRawValidJson() {
-        String json = "{"
-                + "\"transactionId\":\"TX1004\","
-                + "\"accountId\":\"ACC102\","
-                + "\"amount\":1500.00,"
-                + "\"currency\":\"INR\","
-                + "\"timestamp\":\"2026-10-15T12:30:00Z\","
-                + "\"merchant\":\"Flipkart\""
-                + "}";
+    void testProcessDuplicateDeliveryWithIdenticalData() {
+        OffsetDateTime ts = OffsetDateTime.parse("2026-10-15T12:30:00Z");
+        TransactionEvent event = createEvent("TX_DUPE", "ACC101", new BigDecimal("1000.00"), ts);
 
-        ProcessingResult result = service.processRaw(json);
-        assertEquals("TX1004", result.getTransactionId());
+        TransactionEntity stored = new TransactionEntity("TX_DUPE", "ACC101", new BigDecimal("1000.00"), "INR", ts, "Demo Store", "ACCEPTED");
+        when(repository.findByTransactionId("TX_DUPE")).thenReturn(Optional.of(stored));
+
+        ProcessingResult result = service.process(event, null);
+
+        assertEquals(ProcessingResult.Status.DUPLICATE_DELIVERY, result.getStatus());
+        verify(repository, never()).saveTransaction(any());
+        verify(repository, never()).saveAlert(any(), any(), any(), any());
+    }
+
+    @Test
+    void testProcessIdCollisionWithConflictingData() {
+        OffsetDateTime ts = OffsetDateTime.parse("2026-10-15T12:30:00Z");
+        TransactionEvent event = createEvent("TX_COLLISION", "ACC_NEW", new BigDecimal("9999.00"), ts);
+
+        // Stored has different account and amount
+        TransactionEntity stored = new TransactionEntity("TX_COLLISION", "ACC_OLD", new BigDecimal("100.00"), "INR", ts, "Demo Store", "ACCEPTED");
+        when(repository.findByTransactionId("TX_COLLISION")).thenReturn(Optional.of(stored));
+
+        ProcessingResult result = service.process(event, "raw-json-payload");
+
+        assertEquals(ProcessingResult.Status.ID_COLLISION, result.getStatus());
+        verify(repository, never()).saveTransaction(any());
+        verify(repository).saveAlert(eq("TX_COLLISION"), eq("ACC_NEW"), eq("ID_COLLISION"), anyString());
+        verify(repository).saveRejectedEvent(eq("TX_COLLISION"), any(), any(), eq("ID_COLLISION"));
+    }
+
+    @Test
+    void testRapidSpendingRuleTriggeredOnThirdTransactionInWindow() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-10-15T12:30:30Z");
+        TransactionEvent event = createEvent("TX_RAPID_03", "ACC101", new BigDecimal("500.00"), now);
+
+        when(repository.findByTransactionId("TX_RAPID_03")).thenReturn(Optional.empty());
+        // 2 prior transactions already exist in the [now - 60s, now] window
+        when(repository.countTransactionsInWindow(eq("ACC101"), any(), any())).thenReturn(2);
+
+        ProcessingResult result = service.process(event, null);
+
+        assertEquals(ProcessingResult.Status.FLAGGED_RAPID_SPENDING, result.getStatus());
+        assertTrue(result.isRapidSpendingFlag());
+        assertFalse(result.isHighValueFlag());
+
+        verify(repository).saveTransaction(argThat(entity -> "RAPID_SPENDING".equals(entity.getStatus())));
+        verify(repository).saveAlert(eq("TX_RAPID_03"), eq("ACC101"), eq("RAPID_SPENDING"), contains("reached 3 transactions"));
+    }
+
+    @Test
+    void testTwoTransactionsInWindowDoNotTriggerRapidSpending() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-10-15T12:30:30Z");
+        TransactionEvent event = createEvent("TX_RAPID_02", "ACC101", new BigDecimal("500.00"), now);
+
+        when(repository.findByTransactionId("TX_RAPID_02")).thenReturn(Optional.empty());
+        // Only 1 prior transaction in window -> total becomes 2 (below 3)
+        when(repository.countTransactionsInWindow(eq("ACC101"), any(), any())).thenReturn(1);
+
+        ProcessingResult result = service.process(event, null);
+
         assertEquals(ProcessingResult.Status.ACCEPTED, result.getStatus());
+        assertFalse(result.isRapidSpendingFlag());
+        verify(repository, never()).saveAlert(any(), any(), eq("RAPID_SPENDING"), any());
     }
 
     @Test
-    void testProcessMalformedJsonDoesNotCrash() {
-        String badJson = "{ invalid-json-payload ";
-        ProcessingResult result = service.processRaw(badJson);
+    void testBothRulesTriggerSimultaneously() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-10-15T12:30:30Z");
+        // High amount AND rapid spending
+        TransactionEvent event = createEvent("TX_DUAL", "ACC101", new BigDecimal("75000.00"), now);
 
-        assertEquals("UNKNOWN", result.getTransactionId());
-        assertEquals(ProcessingResult.Status.REJECTED_MALFORMED_JSON, result.getStatus());
-        assertTrue(result.getReason().contains("JSON parsing error"));
+        when(repository.findByTransactionId("TX_DUAL")).thenReturn(Optional.empty());
+        when(repository.countTransactionsInWindow(eq("ACC101"), any(), any())).thenReturn(2);
+
+        ProcessingResult result = service.process(event, null);
+
+        assertEquals(ProcessingResult.Status.FLAGGED_HIGH_VALUE_AND_RAPID_SPENDING, result.getStatus());
+        assertTrue(result.isHighValueFlag());
+        assertTrue(result.isRapidSpendingFlag());
+
+        verify(repository).saveTransaction(argThat(entity -> "HIGH_VALUE_AND_RAPID_SPENDING".equals(entity.getStatus())));
+        verify(repository).saveAlert(eq("TX_DUAL"), eq("ACC101"), eq("HIGH_VALUE"), anyString());
+        verify(repository).saveAlert(eq("TX_DUAL"), eq("ACC101"), eq("RAPID_SPENDING"), anyString());
     }
 
     @Test
-    void testProcessValidationErrorHandledGracefully() {
-        String invalidDataJson = "{"
-                + "\"transactionId\":\"TX1005\","
-                + "\"accountId\":\"ACC103\","
-                + "\"amount\":-20.00,"
-                + "\"currency\":\"INR\","
-                + "\"timestamp\":\"2026-10-15T12:30:00Z\","
-                + "\"merchant\":\"Demo Store\""
-                + "}";
+    void testDatabaseFailureThrowsDataAccessException() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-10-15T12:30:00Z");
+        TransactionEvent event = createEvent("TX_FAIL", "ACC101", new BigDecimal("100.00"), now);
 
-        ProcessingResult result = service.processRaw(invalidDataJson);
-        assertEquals("TX1005", result.getTransactionId());
-        assertEquals(ProcessingResult.Status.REJECTED_VALIDATION_ERROR, result.getStatus());
-        assertTrue(result.getReason().contains("amount must be a positive number"));
-    }
+        when(repository.findByTransactionId("TX_FAIL")).thenThrow(new TransientDataAccessResourceException("MySQL connection refused"));
 
-    @Test
-    void testProcessDuplicateTracking() {
-        TransactionEvent event1 = createEvent("TX_DUPE_01", new BigDecimal("1000.00"));
-        TransactionEvent event2 = createEvent("TX_DUPE_01", new BigDecimal("1000.00"));
-
-        service.process(event1);
-        assertEquals(0, service.getDuplicateCount());
-
-        service.process(event2);
-        assertEquals(1, service.getDuplicateCount());
+        assertThrows(DataAccessException.class, () -> service.process(event, null));
     }
 }

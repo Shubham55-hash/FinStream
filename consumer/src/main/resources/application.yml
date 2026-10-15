@@ -4,6 +4,15 @@ server:
 spring:
   application:
     name: finstream-consumer
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:finstream}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${MYSQL_USER:finstream_user}
+    password: ${MYSQL_PASSWORD:finstream_dev_2024}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -21,4 +30,6 @@ finstream:
     topic: ${KAFKA_TOPIC_TRANSACTIONS:transactions}
   monitoring:
     high-value-threshold: 50000.00
+    rapid-spending-count: 3
+    rapid-spending-window-seconds: 60
     currency: INR

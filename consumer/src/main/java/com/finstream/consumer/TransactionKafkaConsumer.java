@@ -4,6 +4,7 @@ import com.finstream.model.ProcessingResult;
 import com.finstream.service.TransactionProcessingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
@@ -14,7 +15,8 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Kafka listener component consuming financial transaction events.
+ * Kafka consumer listener with explicit manual offset acknowledgment
+ * and deliberate database failure propagation.
  */
 @Component
 public class TransactionKafkaConsumer {
@@ -46,14 +48,22 @@ public class TransactionKafkaConsumer {
 
         try {
             ProcessingResult result = processingService.processRaw(payload);
-            logger.debug("Processing completed: txId={}, status={}", result.getTransactionId(), result.getStatus());
-        } catch (Exception e) {
-            logger.error("Unexpected error while processing transaction payload: {}", payload, e);
-        } finally {
-            // Acknowledge offset only after processing/logging has executed
+            logger.info("[Kafka Consumer] Processed txId='{}': status={}", result.getTransactionId(), result.getStatus());
+
+            // Acknowledge offset ONLY after validation, monitoring, and database persistence succeed
             if (acknowledgment != null) {
                 acknowledgment.acknowledge();
             }
+        } catch (DataAccessException e) {
+            // Database failure: DO NOT acknowledge offset!
+            // Throw exception so Spring Kafka triggers bounded retries without losing the message
+            logger.error("[Kafka Consumer] Database failure for offset {} (key='{}'). NOT acknowledging offset: {}",
+                    offset, key, e.getMessage());
+            throw e;
+        } catch (Exception e) {
+            logger.error("[Kafka Consumer] Unexpected fatal failure for offset {} (key='{}'): {}",
+                    offset, key, e.getMessage(), e);
+            throw e;
         }
     }
 
