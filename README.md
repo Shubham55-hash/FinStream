@@ -13,32 +13,32 @@ flowchart TD
     end
 
     subgraph KafkaBroker ["Apache Kafka (KRaft Mode :9092)"]
-        KP -->|Topic: 'transactions' <br/> acks=all, Key: transactionId| KT[Partition 0]
+        KP -->|"Topic: transactions (acks=all)"| KT[Partition 0]
     end
 
     subgraph Consumer ["Java 17 / Spring Boot Stream Consumer (:8080)"]
         KT -->|Manual Immediate Acknowledgment| KC[TransactionKafkaConsumer]
         KC --> PS[TransactionProcessingService]
-        PS -->|1. Validate Schema & Contract| VAL{Valid?}
-        VAL -->|No: Malformed or Invalid| REJ[Save to rejected_events <br/> Acknowledge Offset]
+        PS -->|1. Validate Schema and Contract| VAL{Valid?}
+        VAL -->|No: Malformed or Invalid| REJ[Save to rejected_events and Ack]
         VAL -->|Yes| IDEM{Check MySQL for tx_id}
-        IDEM -->|Identical Payload| DUP[Acknowledge as DUPLICATE_DELIVERY <br/> Do NOT insert or refire alerts]
-        IDEM -->|Different Payload| COL[Acknowledge as ID_COLLISION <br/> Record alert & rejected_events]
+        IDEM -->|Identical Payload| DUP[Acknowledge as DUPLICATE_DELIVERY]
+        IDEM -->|Different Payload| COL[Acknowledge as ID_COLLISION]
         IDEM -->|New Transaction| RULES[Evaluate Monitoring Rules]
-        RULES -->|Amount > 50,000 INR| HVA[Trigger HIGH_VALUE Alert]
-        RULES -->|>= 3 Tx in [t-60s, t]| RSA[Trigger RAPID_SPENDING Alert]
+        RULES -->|Amount greater than 50000 INR| HVA[Trigger HIGH_VALUE Alert]
+        RULES -->|3 or more Tx in 60s window| RSA[Trigger RAPID_SPENDING Alert]
         HVA --> TXWRITE[Atomic / Idempotent MySQL Persistence]
         RSA --> TXWRITE
     end
 
     subgraph MySQLDB ["MySQL Relational Store (:3306)"]
         TXWRITE -->|Unique tx_id| TBL_TX[(transactions)]
-        TXWRITE -->|uk_alerts_tx_type| TBL_AL[(transaction_alerts)]
+        TXWRITE -->|Unique tx_id + alert_type| TBL_AL[(transaction_alerts)]
         REJ --> TBL_RJ[(rejected_events)]
     end
 
     subgraph WebDashboard ["Real-Time Web Console (Vanilla JS / CSS)"]
-        REST[REST API Controller] -->|/api/stats, /api/transactions, /api/alerts, /api/rejected| UI[Live Dark Dashboard]
+        REST[REST API Controller] -->|Live REST Endpoints| UI[Live Dark Dashboard]
         UI -->|Manual Trigger /api/send| KP
         UI -->|Clear Data /api/clear| MySQLDB
     end
