@@ -13,6 +13,8 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -104,9 +106,10 @@ public class TransactionRepository {
      * Persist rejected event details for audit and analysis.
      */
     public void saveRejectedEvent(String transactionId, String payload, String reason, String rejectionType) {
+        String safeReason = (reason != null && reason.length() > 255) ? reason.substring(0, 252) + "..." : reason;
         String sql = "INSERT INTO rejected_events (transaction_id, payload, reason, rejection_type) " +
                 "VALUES (?, ?, ?, ?)";
-        jdbcTemplate.update(sql, transactionId, payload, reason, rejectionType);
+        jdbcTemplate.update(sql, transactionId, payload, safeReason, rejectionType);
     }
 
     /**
@@ -122,5 +125,44 @@ public class TransactionRepository {
 
         Integer count = jdbcTemplate.queryForObject(sql, Integer.class, accountId, startTs, endTs);
         return count != null ? count : 0;
+    }
+
+    /**
+     * Fetch recent transactions for live dashboard monitoring.
+     */
+    public List<Map<String, Object>> getRecentTransactions(int limit) {
+        String sql = "SELECT transaction_id, account_id, amount, currency, transaction_timestamp, merchant, status, created_at " +
+                "FROM transactions ORDER BY id DESC LIMIT ?";
+        return jdbcTemplate.queryForList(sql, limit);
+    }
+
+    /**
+     * Fetch recent alerts for live dashboard monitoring.
+     */
+    public List<Map<String, Object>> getRecentAlerts(int limit) {
+        String sql = "SELECT id, transaction_id, account_id, alert_type, description, created_at " +
+                "FROM transaction_alerts ORDER BY id DESC LIMIT ?";
+        return jdbcTemplate.queryForList(sql, limit);
+    }
+
+    /**
+     * Fetch high-level statistics for the dashboard header cards.
+     */
+    public Map<String, Object> getDashboardStats() {
+        String txSql = "SELECT " +
+                "COUNT(*) AS total_transactions, " +
+                "COALESCE(SUM(amount), 0) AS total_volume_inr, " +
+                "COALESCE(SUM(CASE WHEN status LIKE '%HIGH_VALUE%' THEN 1 ELSE 0 END), 0) AS high_value_count, " +
+                "COALESCE(SUM(CASE WHEN status LIKE '%RAPID_SPENDING%' THEN 1 ELSE 0 END), 0) AS rapid_spending_count " +
+                "FROM transactions";
+
+        Map<String, Object> stats = jdbcTemplate.queryForMap(txSql);
+
+        Integer totalAlerts = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM transaction_alerts", Integer.class);
+        Integer totalRejected = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM rejected_events", Integer.class);
+
+        stats.put("total_alerts", totalAlerts != null ? totalAlerts : 0);
+        stats.put("total_rejected", totalRejected != null ? totalRejected : 0);
+        return stats;
     }
 }

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinStream — Real-Time Transaction Monitoring Dashboard</title>
+  <meta name="description" content="Real-time financial stream monitoring and fraud detection dashboard powered by Apache Kafka, Spring Boot, and MySQL.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-text">
+          <h1>FinStream Live Monitor</h1>
+          <p>Real-Time Financial Transaction Monitoring & Fraud Detection</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <div class="pulse-indicator">
+          <div class="pulse-orb"></div>
+          <span id="connection-status">Live Connected (Kafka + MySQL)</span>
+        </div>
+        <button id="btn-manual-refresh" class="btn-refresh" title="Refresh Live Data">
+          <span>🔄</span> Refresh
+        </button>
+      </div>
+    </header>
+
+    <!-- Metrics Cards Grid -->
+    <section class="metrics-grid">
+      <div class="metric-card card-tx">
+        <div class="metric-header">
+          <span class="metric-title">Transactions</span>
+          <span class="metric-icon">💳</span>
+        </div>
+        <div id="stat-total-tx" class="metric-value">0</div>
+        <div class="metric-sub">Persisted in MySQL</div>
+      </div>
+
+      <div class="metric-card card-vol">
+        <div class="metric-header">
+          <span class="metric-title">Total Volume</span>
+          <span class="metric-icon">₹</span>
+        </div>
+        <div id="stat-total-vol" class="metric-value">₹0.00</div>
+        <div class="metric-sub">Processed Volume (INR)</div>
+      </div>
+
+      <div class="metric-card card-hv">
+        <div class="metric-header">
+          <span class="metric-title">High-Value Flags</span>
+          <span class="metric-icon">🚨</span>
+        </div>
+        <div id="stat-hv-count" class="metric-value">0</div>
+        <div class="metric-sub">&gt; 50,000 INR Rule</div>
+      </div>
+
+      <div class="metric-card card-rs">
+        <div class="metric-header">
+          <span class="metric-title">Rapid-Spending</span>
+          <span class="metric-icon">⚡</span>
+        </div>
+        <div id="stat-rs-count" class="metric-value">0</div>
+        <div class="metric-sub">&ge; 3 Tx in Rolling 60s Window</div>
+      </div>
+
+      <div class="metric-card card-alt">
+        <div class="metric-header">
+          <span class="metric-title">Total Alerts</span>
+          <span class="metric-icon">🛡️</span>
+        </div>
+        <div id="stat-alerts-count" class="metric-value">0</div>
+        <div class="metric-sub">Security & Fraud Detections</div>
+      </div>
+    </section>
+
+    <!-- Control Center / Action Panel -->
+    <section class="control-panel">
+      <div class="panel-header">
+        <h2><span>🎮</span> Manual Event Injector & Test Simulator</h2>
+        <span class="metric-sub">Publish live events directly to Kafka topic <code>transactions</code></span>
+      </div>
+
+      <div class="trigger-grid">
+        <!-- Custom Transaction Form -->
+        <form id="custom-tx-form" class="custom-form" onsubmit="return false;">
+          <div class="form-group">
+            <label for="input-account">Account ID</label>
+            <input type="text" id="input-account" class="form-input" placeholder="e.g. ACC101" value="ACC101">
+          </div>
+          <div class="form-group">
+            <label for="input-amount">Amount (INR)</label>
+            <input type="number" id="input-amount" class="form-input" placeholder="1500.00" value="1500.00" step="0.01">
+          </div>
+          <div class="form-group">
+            <label for="input-merchant">Merchant</label>
+            <input type="text" id="input-merchant" class="form-input" placeholder="Merchant Name" value="Cloud Retail Store">
+          </div>
+          <button id="btn-submit-tx" class="btn-primary" type="button">
+            <span>🚀</span> Send Tx
+          </button>
+        </form>
+
+        <!-- Quick Scenario Buttons -->
+        <div class="quick-buttons">
+          <button id="btn-quick-normal" class="btn-quick" title="Send a normal transaction under 50k">
+            🟢 Normal (₹1,500)
+          </button>
+          <button id="btn-quick-hv" class="btn-quick btn-quick-hv" title="Send a transaction over 50,000 INR">
+            🚨 High-Value (₹75,000)
+          </button>
+          <button id="btn-quick-rs" class="btn-quick btn-quick-rs" title="Burst 3 transactions in rapid succession">
+            ⚡ Rapid-Burst (3x)
+          </button>
+          <button id="btn-quick-dup" class="btn-quick btn-quick-dup" title="Replay identical transaction ID to verify idempotency">
+            🔁 Duplicate Test
+          </button>
+          <button id="btn-quick-poison" class="btn-quick" title="Send malformed JSON to verify consumer does not crash">
+            ⚠️ Poison Pill
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content: Transactions Feed & Alerts Feed -->
+    <main class="content-grid">
+      <!-- Live Transactions Feed -->
+      <section class="card-panel">
+        <div class="card-panel-header">
+          <h2><span>📋</span> Live Processed Transactions</h2>
+          <span class="badge-count" id="tx-table-count">Latest 20</span>
+        </div>
+        <div class="table-wrapper">
+          <table class="styled-table" id="transactions-table">
+            <thead>
+              <tr>
+                <th>Tx ID</th>
+                <th>Account</th>
+                <th>Amount</th>
+                <th>Merchant</th>
+                <th>Status</th>
+                <th>Event Time (UTC)</th>
+              </tr>
+            </thead>
+            <tbody id="transactions-tbody">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 2rem;">Loading stream...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Live Security & Fraud Alerts Feed -->
+      <section class="card-panel">
+        <div class="card-panel-header">
+          <h2><span>🚨</span> Fraud & Security Alerts</h2>
+          <span class="badge-count" id="alerts-count-badge">Real-Time</span>
+        </div>
+        <div class="alerts-list" id="alerts-container">
+          <div style="text-align: center; color: var(--text-dim); padding: 2rem;">No alerts detected yet.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
